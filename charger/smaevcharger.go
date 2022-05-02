@@ -218,17 +218,17 @@ var _ api.MeterCurrent = (*Smaevcharger)(nil)
 
 // Currents implements the api.MeterCurrent interface
 func (wb *Smaevcharger) Currents() (float64, float64, float64, error) {
-	var PhsA = wb.ConvertInterfaceToFloat(wb.GetMeasurement("Measurement.GridMs.A.phsA"))
-	var PhsB = wb.ConvertInterfaceToFloat(wb.GetMeasurement("Measurement.GridMs.A.phsB"))
-	var PhsC = wb.ConvertInterfaceToFloat(wb.GetMeasurement("Measurement.GridMs.A.phsC"))
+	PhsA := wb.ConvertInterfaceToFloat(wb.GetMeasurement("Measurement.GridMs.A.phsA"))
+	PhsB := wb.ConvertInterfaceToFloat(wb.GetMeasurement("Measurement.GridMs.A.phsB"))
+	PhsC := wb.ConvertInterfaceToFloat(wb.GetMeasurement("Measurement.GridMs.A.phsC"))
 	return PhsA, PhsB, PhsC, nil
 }
 
 func (wb *Smaevcharger) GetMeasurementData() bool {
-	Host := wb.host + "/measurements/live"
-	jsonData := []byte(`[{"componentId": "IGULD:SELF"}]`)
+	data := `[{"componentId": "IGULD:SELF"}]`
 
-	req, err := request.New(http.MethodPost, Host, bytes.NewBuffer(jsonData), request.JSONEncoding)
+	uri := wb.host + "/measurements/live"
+	req, err := request.New(http.MethodPost, uri, strings.NewReader(data), request.JSONEncoding)
 	if err == nil {
 		err = wb.DoJSON(req, &wb.MeasurementsData)
 		return err == nil
@@ -334,12 +334,8 @@ func (wb *Smaevcharger) SendMultiParameter(data []smaevcharger.SendData) bool {
 		parameter.Values = append(parameter.Values, payload)
 	}
 
-	Host := wb.host + "/parameters/IGULD:SELF/"
-	jsonData, err := json.Marshal(parameter)
-	if err != nil {
-		return false
-	}
-	req, err := request.New(http.MethodPut, Host, bytes.NewBuffer(jsonData), request.JSONEncoding)
+	uri := wb.host + "/parameters/IGULD:SELF/"
+	req, err := request.New(http.MethodPut, uri, request.MarshalJSON(parameter), request.JSONEncoding)
 	if err == nil {
 		resp, err := wb.Do(req)
 		if resp.StatusCode >= 200 && resp.StatusCode <= 299 && err == nil {
