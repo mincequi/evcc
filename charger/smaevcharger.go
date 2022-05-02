@@ -37,12 +37,12 @@ import (
 // smaevchager charger implementation
 type Smaevcharger struct {
 	*request.Helper
-	log              *util.Logger
-	host             string // 192.168.XXX.XXX
-	user             string // LOGIN user
-	password         string // password
-	MeasurementsData []smaevcharger.Measurements
-	ParametersData   []smaevcharger.Parameters
+	log      *util.Logger
+	host     string // 192.168.XXX.XXX
+	user     string // LOGIN user
+	password string // password
+	// MeasurementsData []smaevcharger.Measurements
+	// ParametersData   []smaevcharger.Parameters
 }
 
 func init() {
@@ -131,14 +131,15 @@ func (wb *Smaevcharger) Status() (api.ChargeStatus, error) {
 	StateChargerCharging := wb.GetMeasurement("Measurement.Operation.EVeh.ChaStt")
 
 	switch StateChargerCharging {
-	case smaevcharger.ConstNConNCarNChar: // No Car connectec and no charging
+	case smaevcharger.ConstNConNCarNChar: // Not connected
 		return api.StatusA, nil
-	case smaevcharger.ConstYConYCarNChar: // Car connected and no charging
+	case smaevcharger.ConstYConYCarNChar: // Connected
 		return api.StatusB, nil
-	case smaevcharger.ConstYConYCarYChar: // Car connected and charging
+	case smaevcharger.ConstYConYCarYChar: // Charging
 		return api.StatusC, nil
+	default:
+		return api.StatusNone, fmt.Errorf("SMA EV Charger state: %s", StateChargerCharging)
 	}
-	return api.StatusNone, fmt.Errorf("SMA EV Charger state: %s", StateChargerCharging)
 }
 
 // Enabled implements the api.Charger interface
@@ -224,68 +225,67 @@ func (wb *Smaevcharger) Currents() (float64, float64, float64, error) {
 	return PhsA, PhsB, PhsC, nil
 }
 
-func (wb *Smaevcharger) GetMeasurementData() bool {
+func (wb *Smaevcharger) getMeasurements() ([]smaevcharger.Measurements, error) {
+	var res []smaevcharger.Measurements
 	data := `[{"componentId": "IGULD:SELF"}]`
 
 	uri := wb.host + "/measurements/live"
 	req, err := request.New(http.MethodPost, uri, strings.NewReader(data), request.JSONEncoding)
 	if err == nil {
-		err = wb.DoJSON(req, &wb.MeasurementsData)
-		return err == nil
+		err = wb.DoJSON(req, &res)
 	}
-	return false
+
+	return res, err
 }
 
-func (wb *Smaevcharger) GetParameterData() bool {
-	Host := wb.host + "/parameters/search/"
-	jsonData := []byte(`{"queryItems":[{"componentId":"IGULD:SELF"}]}`)
+func (wb *Smaevcharger) getParameters() ([]smaevcharger.Parameters, error) {
+	var res []smaevcharger.Parameters
+	data := `{"queryItems":[{"componentId":"IGULD:SELF"}]}`
 
-	req, err := request.New(http.MethodPost, Host, bytes.NewBuffer(jsonData), request.JSONEncoding)
+	uri := wb.host + "/parameters/search/"
+	req, err := request.New(http.MethodPost, uri, strings.NewReader(data), request.JSONEncoding)
 	if err == nil {
-		err = wb.DoJSON(req, &wb.ParametersData)
-		return err == nil
+		err = wb.DoJSON(req, &res)
 	}
-	return false
+
+	return res, err
 }
 
-func (wb *Smaevcharger) GetMeasurement(id string) interface{} {
-	dataok := wb.GetMeasurementData()
-	if !dataok {
-		nil := fmt.Errorf("failed to aquire measurement data")
-		return nil
+func (wb *Smaevcharger) GetMeasurement(id string) (interface{}, error) {
+	data, err := wb.getMeasurements()
+	if err != nil {
+		return nil, err
 	}
-	var returndata interface{}
 
-	for i := range wb.MeasurementsData {
-		if wb.MeasurementsData[i].ChannelId == id {
-			returndata = wb.MeasurementsData[i].Values[0].Value
-			return returndata
+	for _, val := range data {
+		if val.ChannelId == id {
+			return val.Values[0].Value, nil
 		}
 	}
-	return returndata
+
+	return nil, nil
 }
 
-func (wb *Smaevcharger) GetParameter(id string) interface{} {
-	dataok := wb.GetParameterData()
-	if !dataok {
-		nil := fmt.Errorf("failed to aquire parameter data")
-		return nil
+func (wb *Smaevcharger) GetParameter(id string) (interface{}, error) {
+	data, err := wb.getParameters()
+	if err != nil {
+		return nil, err
 	}
-	var returndata interface{}
 
-	for i := range wb.ParametersData[0].Values {
-		if wb.ParametersData[0].Values[i].ChannelId == id {
-			returndata = wb.ParametersData[0].Values[i].Value
-			return returndata
+	for _, val := range data[0].Values {
+		if val.ChannelId == id {
+			return val.Value, nil
 		}
 	}
-	return returndata
+
+	return nil, nil
 }
 
 func (wb *Smaevcharger) SendParameter(id string, value string) bool {
 	if wb.ParametersData == nil {
-		wb.GetParameterData()
+		wb.getParameters()
 	}
+
 	var parameter smaevcharger.SendParameter
 	var data smaevcharger.SendData
 
@@ -294,15 +294,15 @@ func (wb *Smaevcharger) SendParameter(id string, value string) bool {
 	data.Value = value
 	parameter.Values = append(parameter.Values, data)
 
-	parameterAvaliable := false
+	parameterAvailable := false
 	for i := range wb.ParametersData[0].Values {
 		if wb.ParametersData[0].Values[i].ChannelId == id {
-			parameterAvaliable = true
+			parameterAvailable = true
 			break
 		}
 	}
 
-	if parameterAvaliable {
+	if parameterAvailable {
 
 		Host := wb.host + "/parameters/IGULD:SELF/"
 		jsonData, err := json.Marshal(parameter)
@@ -322,7 +322,7 @@ func (wb *Smaevcharger) SendParameter(id string, value string) bool {
 
 func (wb *Smaevcharger) SendMultiParameter(data []smaevcharger.SendData) bool {
 	if wb.ParametersData == nil {
-		wb.GetParameterData()
+		wb.getParameters()
 	}
 	var parameter smaevcharger.SendParameter
 	var payload smaevcharger.SendData
